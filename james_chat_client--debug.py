@@ -85,6 +85,8 @@ def connect_to_server():
             print(f'BACKEND_EVENT: connected to server')
             connected = True
             print(f'Connection Status: {connected}')
+
+            send_msg('joined the server')
             
     # Some kind of error has come up with connection
     except Exception as e:
