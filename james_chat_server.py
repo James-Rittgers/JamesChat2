@@ -9,134 +9,26 @@ send_all_lock = threading.RLock()
 send_queue = queue.Queue()
 
 class ListeningThread():
-    def __init__(self, connection):
-        pass
-
-class ThreadedEchoRequestHandler(socketserver.BaseRequestHandler):
-
-    def process_msg(self, msg_type, msg_body):
-        '''Process the message based on what type it is'''
-        rebroadcast_msg = f'{msg_type}|{msg_body}'.encode()
-                       
-        if msg_type == 'CHAT_MSG' or msg_type == "CHAT_IMG":
-            self.send_to_all(rebroadcast_msg)
-            
-    def listen(self):
-        '''Listen to the client connected to this thread'''
-        print(f'\nListening to client {self.request} on thread {threading.current_thread()}')
-        while True:
-            try:
-                # Print whatever we receive from the client
-                data = self.request.recv(1024).decode()
-                data_lst = data.split('|')
-                print(f'\nReceived "{data}" from {self.request}')
-                msg_type = str(data_lst[0])
-                msg_body = str(data_lst[1])
-                self.process_msg(msg_type, msg_body)
- 
-            except ConnectionResetError:
-                # If the client disconnects unexpectedly, terminate this thread.
-                # The sending thread will remain active then terminate next time
-                # someone sends a message.
-                print(f'\nClient {self.request} disconnected -- listening thread close')
-                self.request.close()
-                break
-            
-    def send_to_client(self, txt):
-        '''Send to the client connected to this thread'''
-        print(f'\nSending {txt} to client {self.request}')
-
-        try:
-            self.request.send(txt)
-            
-        except Exception as e:
-            print(f'\nSending to client {self.request} failed with exception {e}')
-            # Return the fact that we failed, and the thread will terminate in its mainloop
-            return 1
-        
-        return 0
-
-    def get_sending_threads(self):
-        '''Return the number of open sending threads'''
-        threads = 0
-        
-        for thread in threading.enumerate():
-            if 'process_request_thread' in thread.name:
-                threads += 1
-                
-        return threads
+    
+    def __init__(self, connection, sending_thread, sending_obj):
+        self.connection = connection
+        self.sending_thread = sending_thread
+        self.sending_obj = sending_obj
         
 
-    def send_to_all(self, txt):
-        '''Send a message to all clients by telling
-        every open sending thread to pass on the message'''
-        
-        # Lock all sending threads
-        send_all_lock.acquire(blocking=True)
-        print(f'\nSending {txt} to all clients')
+class SendingThread():
+    def __init(self, connection):
+        self.connection = connection
+        self.is_active = True
 
-        # Get the number of active clients by finding the number
-        # of active sending threads. Some clients may not be up still,
-        # but the sending threads account for this and will terminate
-        # if they are unable to send a messages
-        num_clients = self.get_sending_threads()
-        
-        for client in range(0, num_clients):
-            # Add the message once for every client connection. Every
-            # sending thread will grab the first item it sees, then remove it
-            # from the queue, then wait to be unlocked.
-            send_queue.put(txt)
-
-        # Wait for the queue to clear
-        send_queue.join()
-
-        # Release the sending threads
-        send_all_lock.release()
-        print(f'\nMessage {txt} sent to all clients')
-                
+class ThreadedRequestHandler(socketserver.BaseRequestHandler):                    
 
     def handle(self):
         '''Handle and keep open a client connection'''
         print(f'\nConnected to client {self.request} on thread {threading.current_thread()}')
-        listening_thread = threading.Thread(target=self.listen)
-        listening_thread.start()
-        sent = False
-
-        # Keep client connection open
-        while True:
-
-            # If there is a new message to send and I haven't already sent it
-            if send_all_lock.locked() and sent == False:
-                print(f'\nLocked {threading.current_thread()}')
-                
-                # Get the new message
-                msg = send_queue.get()
-                
-                # Send the new message
-                send_status = self.send_to_client(msg)
-                
-                # Record that I have sent it, then remove it from the
-                # task list
-                send_queue.task_done()
-                sent = True
-
-                # If some kind of exception occurs while sending the message,
-                # exit this loop
-                if send_status == 1:
-                    print(f'\nError sending to client {self.request}, sending thread close')
-                    break
-                
-            # If there is no new message but I have sent the last one
-            elif not send_all_lock.locked() and sent == True:
-                
-                # Reset for next time
-                sent = False
-                print('\nUnlocked {threading.current_thread()}')
-
-            time.sleep(0.1)
-            
-        # Once this loop is done, terminate this thread
-        return
+        send_obj = SendingThread(connection=self.request)
+        sending_thread = threading.Thread(target=send_obj.mainloop)
+        listen_obj = ListeningThread(connection=self.request, sending_thread=sending_thread, sending_obj=send_obj)
 
 class ThreadedEchoServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     pass
