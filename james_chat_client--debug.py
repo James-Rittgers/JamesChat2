@@ -14,12 +14,12 @@ print('GUI_EVENT: DPG setup success')
 username = None
 connected = False
 
-def send_msg(txt):
+def send_msg(txt, type='CHAT_MSG'):
     '''Send a message to the server'''
     global connected
     print(f'Connection Status: {connected}')
     if connected == True:
-        txt = f"{username}: {txt}"
+        txt = f"{type}|{username}: {txt}"
         client.send(txt.encode())
         print(f'BACKEND_EVENT: sending message {txt} to server')
 
@@ -33,10 +33,15 @@ def recv_msg():
             try:
                 print('BACKEND_EVENT: listening for server...')
                 response = client.recv(1024).decode()
+                response_lst = response.split('|')
+                resp_type = response_lst[0]
+                resp_body = response_lst[1]
 
                 if response != None:
-                    add_msg(response)
-                    print(f'BACKEND_EVENT: received message {response}')
+
+                    if resp_type == 'CHAT_MSG':
+                        add_msg(resp_body)
+                        print(f'BACKEND_EVENT: received message {response}')
 
                 time.sleep(0.5)
             except ConnectionResetError:
@@ -149,6 +154,7 @@ with dpg.window(label="main_window", tag="primary", show=False):
         with dpg.group(horizontal=True):
             dpg.add_input_text(label="", hint="Type message here", tag="message_field", on_enter=True, callback=enter_msg)
             dpg.add_button(label="Send", callback=enter_msg)
+        
 
     print('GUI_EVENT: chatroom_interface setup success')
 
