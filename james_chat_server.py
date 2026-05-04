@@ -8,7 +8,18 @@ import subprocess
 send_all_lock = threading.RLock()
 send_queue = queue.Queue()
 
+class ListeningThread():
+    def __init__(self, connection):
+        pass
+
 class ThreadedEchoRequestHandler(socketserver.BaseRequestHandler):
+
+    def process_msg(self, msg_type, msg_body):
+        '''Process the message based on what type it is'''
+        rebroadcast_msg = f'{msg_type}|{msg_body}'.encode()
+                       
+        if msg_type == 'CHAT_MSG' or msg_type == "CHAT_IMG":
+            self.send_to_all(rebroadcast_msg)
             
     def listen(self):
         '''Listen to the client connected to this thread'''
@@ -16,15 +27,19 @@ class ThreadedEchoRequestHandler(socketserver.BaseRequestHandler):
         while True:
             try:
                 # Print whatever we receive from the client
-                data = self.request.recv(1024)
+                data = self.request.recv(1024).decode()
+                data_lst = data.split('|')
                 print(f'\nReceived "{data}" from {self.request}')
-                self.send_to_all(data)
-                
+                msg_type = str(data_lst[0])
+                msg_body = str(data_lst[1])
+                self.process_msg(msg_type, msg_body)
+ 
             except ConnectionResetError:
                 # If the client disconnects unexpectedly, terminate this thread.
                 # The sending thread will remain active then terminate next time
                 # someone sends a message.
                 print(f'\nClient {self.request} disconnected -- listening thread close')
+                self.request.close()
                 break
             
     def send_to_client(self, txt):
