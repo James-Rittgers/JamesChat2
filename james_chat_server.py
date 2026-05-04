@@ -5,30 +5,40 @@ import time
 import queue
 import subprocess
 
-send_all_lock = threading.RLock()
-send_queue = queue.Queue()
-
 class ListeningThread():
     
     def __init__(self, connection, sending_thread, sending_obj):
         self.connection = connection
         self.sending_thread = sending_thread
         self.sending_obj = sending_obj
-        
+
+    def mainloop(self):
+        '''Constantly listen for data from a client'''
+        raise NotImplementedError
 
 class SendingThread():
-    def __init(self, connection):
+    def __init__(self, connection):
         self.connection = connection
         self.is_active = True
+
+    def mainloop(self):
+        '''Constantly wait to send something'''
+        raise NotImplementedError
 
 class ThreadedRequestHandler(socketserver.BaseRequestHandler):                    
 
     def handle(self):
         '''Handle and keep open a client connection'''
         print(f'\nConnected to client {self.request} on thread {threading.current_thread()}')
+        
         send_obj = SendingThread(connection=self.request)
         sending_thread = threading.Thread(target=send_obj.mainloop)
+        
         listen_obj = ListeningThread(connection=self.request, sending_thread=sending_thread, sending_obj=send_obj)
+        listen_thread = threading.Thread(target=listen_obj.mainloop)
+
+        sending_thread.join()
+        listening_thread.join()
 
 class ThreadedEchoServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     pass
