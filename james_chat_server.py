@@ -6,10 +6,11 @@ import queue
 import subprocess
 
 class ListeningThread():
-    def __init__(self, connection, send_queue, disconnect_flag):
+    def __init__(self, connection, send_queue, disconnect_flag, client_addr):
         self.connection = connection
         self.send_queue = send_queue
         self.disconnect_flag = disconnect_flag
+        self.client_addr = client_addr
 
     def mainloop(self):
         '''Constantly listen for data from a client'''
@@ -17,20 +18,27 @@ class ListeningThread():
             
             try:
                 msg = self.connection.recv(1024)
+                print(f'\nReceived {msg} from {self.client_addr}')
                 self.handle_message(msg)
                 
-            except:
-                print(f'Connection lost -- close listen')
+            except Exception as e:
+                print(f'\nConnection to {self.client_addr} lost with error\
+\n\n{e}\nlistening thread close')
                 self.disconnect_flag.set()
+
+            time.sleep(1)
 
     def send_to_client(self, msg):
         '''Send a message to the connected client'''
+        print(f'\nAdding {msg} to {self.client_addr} queue')
         self.send_queue.put(msg)
 
     def send_to_all(self, msg):
         '''Send a message to all connected clients'''
         for connection in connect_dict.keys():
-            connect_dict[connection].put(msg)
+            conn_queue = connect_dict[connection]
+            print(f'\nAdding {msg} to {connection} queue')
+            conn_queue.put(msg)
 
     def handle_message(self, msg):
         '''Decode and respond to a client message'''
@@ -42,10 +50,11 @@ class ListeningThread():
 
 
 class SendingThread():
-    def __init__(self, connection, send_queue, disconnect_flag):
+    def __init__(self, connection, send_queue, disconnect_flag, client_addr):
         self.connection = connection
         self.send_queue = send_queue
         self.disconnect_flag = disconnect_flag
+        self.client_addr = client_addr
 
     def mainloop(self):
         '''Constantly wait to send something'''
@@ -59,11 +68,13 @@ class SendingThread():
                     msg = self.send_queue.get()
                     self.send_msg(msg)
                     self.send_queue.task_done()
-                    
-        print(f'Connection lost -- close send thread')
+            time.sleep(1)
+            
+        print(f'\nConnection to {self.client_addr} lost, sending thread close')
 
     def send_msg(self, msg):
         '''Send a message to the client'''
+        print(f'\nSending {msg} to {self.client_addr}')
         self.connection.send(msg)
 
 class ThreadedRequestHandler(socketserver.BaseRequestHandler):                    
@@ -76,11 +87,11 @@ class ThreadedRequestHandler(socketserver.BaseRequestHandler):
         client = self.client_address
         
         send_obj = SendingThread(connection=self.request, send_queue=send_queue,
-                                 disconnect_flag=disconnect_flag)
+                                 disconnect_flag=disconnect_flag, client_addr=client)
         send_thread = threading.Thread(target=send_obj.mainloop)
         
         listen_obj = ListeningThread(connection=self.request, send_queue=send_queue,
-                                     disconnect_flag=disconnect_flag)
+                                     disconnect_flag=disconnect_flag, client_addr=client)
         listen_thread = threading.Thread(target=listen_obj.mainloop)
 
         send_thread.start()
@@ -88,12 +99,12 @@ class ThreadedRequestHandler(socketserver.BaseRequestHandler):
 
         connect_dict[client] = send_queue
         
-        print(f'Connected to {client}')
+        print(f'\nConnected to {client}')
 
         send_thread.join()
         listen_thread.join()
         
-        print(f'Connection to {self.client_address} shutdown')
+        print(f'\nConnection to {self.client_address} shutdown')
         
         send_queue.shutdown()
         del connect_dict[client]
