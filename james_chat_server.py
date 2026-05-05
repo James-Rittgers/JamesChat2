@@ -5,89 +5,101 @@ import time
 import queue
 import subprocess
 
-send_all_lock = threading.RLock()
-send_queue = queue.Queue()
+connect_dict = {}
 
 class ListeningThread():
-    
-    def __init__(self, connection, connect_status, send_queue, send_lock):
+    def __init__(self, connection, send_queue, disconnect_flag):
         self.connection = connection
-        self.connect_status = connect_status
         self.send_queue = send_queue
-        self.send_lock = send_lock
+        self.disconnect_flag = disconnect_flag
 
     def mainloop(self):
         '''Constantly listen for data from a client'''
-        raise NotImplementedError
+        while not self.disconnect_flag.is_set():
+            msg = self.connection.recv(1024)
+            self.handle_message(msg)
 
-    def send_to_client(self):
+    def send_to_client(self, msg):
         '''Send a message to the connected client'''
-        raise NotImplementedError
+        self.send_queue.put(msg)
 
-    def send_to_all(self):
+    def send_to_all(self, msg):
         '''Send a message to all connected clients'''
-        raise NotImplementedError
+        for connection in connect_dict.keys():
+            connect_dict[connection].put(msg)
 
-    def handle_message(self, data):
+    def handle_message(self, msg):
         '''Decode and respond to a client message'''
-        raise NotImplementedError
+        msg_parse = msg.decode().split('|')
+        msg_type, msg_body = msg_parse
 
-    def close(self):
-        '''Cleanup and terminate'''
-        raise NotImplementedError
-        
+        if msg_type == 'CHAT_MSG':
+            self.send_to_all(msg)
+
 
 class SendingThread():
-    def __init__(self, connection, send_queue, send_lock):
+    def __init__(self, connection, send_queue, disconnect_flag):
         self.connection = connection
-        self.is_active = True
         self.send_queue = send_queue
-        self.send_lock = send_lock
+        self.disconnect_flag = disconnect_flag
 
     def mainloop(self):
         '''Constantly wait to send something'''
-        raise NotImplementedError
+        while not self.disconnect_flag.is_set():
 
-    def send_msg(self, type, body):
+            queue_len = self.send_queue.qsize()
+
+            if queue_len > 0:
+                for i in range(0, queue_len):
+                    msg = self.send_queue.get()
+                    self.send_msg(msg)
+                    self.send_queue.task_done()
+
+    def send_msg(self, msg):
         '''Send a message to the client'''
-        raise NotImplementedError
-
-    def close(self):
-        '''Cleanup and terminate'''
-        raise NotImplementedError
+        self.connection.send(msg)
 
 class ThreadedRequestHandler(socketserver.BaseRequestHandler):                    
 
     def handle(self):
         '''Handle and keep open a client connection'''
-        print(f'\nConnected to client {self.request} on thread {threading.current_thread()}')
-        client_queue = queue.Queue()
-        client_lock = threading.RLock()
+        send_queue = queue.Queue()
+        disconnect_flag = threading.Event()
         
-        send_obj = SendingThread(connection=self.request, send_queue=client_queue, send_lock=client_lock)
-        sending_thread = threading.Thread(target=send_obj.mainloop)
+        send_obj = SendingThread(connection=self.request, send_queue=send_queue,
+                                 disconnect_flag=disconnect_flag)
+        send_thread = threading.Thread(target=send_obj.mainloop)
         
-        listen_obj = ListeningThread(connection=self.request, sending_thread=sending_thread, sending_obj=send_obj, send_queue=client_queue, send_lock=client_lock)
+        listen_obj = ListeningThread(connection=self.request, send_queue=send_queue,
+                                     disconnect_flag=disconnect_flag)
         listen_thread = threading.Thread(target=listen_obj.mainloop)
 
-        sending_thread.join()
-        listening_thread.join()
+        send_thread.start()
+        listen_thread.start()
 
-class ThreadedEchoServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+        connect_dict[self.client_address] = send_queue
+        print(connect_dict)
+
+        send_thread.join()
+        listen_thread.join()
+        
+        send_queue.shutdown()
+        #connect_dict.remove(f'{self.client_address}')
+
+class ThreadedServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     pass
 
 # Configure server hosting
 ip = socket.gethostbyname(socket.gethostname())
 port = 6767
 address = (ip, port)
-server = ThreadedEchoServer(address, ThreadedEchoRequestHandler)
+server = ThreadedServer(address, ThreadedRequestHandler)
 
 # Run server thread
 server_thread = threading.Thread(target=server.serve_forever)
 server_thread.daemon = False # don't hang on exit
 server_thread.start()
 print(f'Hosting server on {ip}:{port}')
-print(f'Server loop running in thread {server_thread.name}')
 
 # Keep the window open for debug messages
 while True:
