@@ -5,8 +5,6 @@ import time
 import queue
 import subprocess
 
-connect_dict = {}
-
 class ListeningThread():
     def __init__(self, connection, send_queue, disconnect_flag):
         self.connection = connection
@@ -16,8 +14,14 @@ class ListeningThread():
     def mainloop(self):
         '''Constantly listen for data from a client'''
         while not self.disconnect_flag.is_set():
-            msg = self.connection.recv(1024)
-            self.handle_message(msg)
+            
+            try:
+                msg = self.connection.recv(1024)
+                self.handle_message(msg)
+                
+            except:
+                print(f'Connection lost -- close listen')
+                self.disconnect_flag.set()
 
     def send_to_client(self, msg):
         '''Send a message to the connected client'''
@@ -50,10 +54,13 @@ class SendingThread():
             queue_len = self.send_queue.qsize()
 
             if queue_len > 0:
+                
                 for i in range(0, queue_len):
                     msg = self.send_queue.get()
                     self.send_msg(msg)
                     self.send_queue.task_done()
+                    
+        print(f'Connection lost -- close send thread')
 
     def send_msg(self, msg):
         '''Send a message to the client'''
@@ -66,6 +73,8 @@ class ThreadedRequestHandler(socketserver.BaseRequestHandler):
         send_queue = queue.Queue()
         disconnect_flag = threading.Event()
         
+        client = self.client_address
+        
         send_obj = SendingThread(connection=self.request, send_queue=send_queue,
                                  disconnect_flag=disconnect_flag)
         send_thread = threading.Thread(target=send_obj.mainloop)
@@ -77,17 +86,22 @@ class ThreadedRequestHandler(socketserver.BaseRequestHandler):
         send_thread.start()
         listen_thread.start()
 
-        connect_dict[self.client_address] = send_queue
-        print(connect_dict)
+        connect_dict[client] = send_queue
+        
+        print(f'Connected to {client}')
 
         send_thread.join()
         listen_thread.join()
         
+        print(f'Connection to {self.client_address} shutdown')
+        
         send_queue.shutdown()
-        #connect_dict.remove(f'{self.client_address}')
+        del connect_dict[client]
 
 class ThreadedServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     pass
+
+connect_dict = {}
 
 # Configure server hosting
 ip = socket.gethostbyname(socket.gethostname())
@@ -97,7 +111,6 @@ server = ThreadedServer(address, ThreadedRequestHandler)
 
 # Run server thread
 server_thread = threading.Thread(target=server.serve_forever)
-server_thread.daemon = False # don't hang on exit
 server_thread.start()
 print(f'Hosting server on {ip}:{port}')
 
