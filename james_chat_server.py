@@ -4,7 +4,7 @@ import socket
 import time
 import queue
 import subprocess
-# test commit
+
 class ListeningThread():
     def __init__(self, connection, send_queue, disconnect_flag, client_addr):
         self.connection = connection
