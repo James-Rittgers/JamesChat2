@@ -5,16 +5,53 @@ import time
 import queue
 import subprocess
 
-class ListeningThread():
-    def __init__(self, connection, send_queue, disconnect_flag, client_addr):
+class Client():
+    def __init__(self, connection, addr):
+        self.addr = addr
+        self.hostname = socket.gethostbyaddr(addr[0])
         self.connection = connection
-        self.send_queue = send_queue
-        self.disconnect_flag = disconnect_flag
-        self.client_addr = client_addr
+        self.send_queue = queue.Queue()
+        self.disconnect_flag = threading.Event()
+
+    def is_connected(self):
+        '''Return True if the client is not disconnected'''
+        if self.disconnect_flag.is_set():
+            return False
+        
+        else:
+            return True
+
+    def get_hostname(self):
+        '''Return the client's hostname'''
+        return self.hostname
+
+    def get_queue(self):
+        '''Return the client's outgoing message queue'''
+        return self.send_queue
+
+    def get_addr(self):
+        '''Return the client's connection address'''
+        return self.addr
+
+    def get_connection(self):
+        '''Return the request socket for this client'''
+        return self.connection
+
+    def disconnect(self):
+        '''Set the disconnection flag of this client to True'''
+        self.disconnect_flag.set()
+        self.send_queue.shutdown()
+
+class ListeningThread():
+    def __init__(self, client_obj):
+        self.client = client_obj
+        self.connection = client_obj.get_connection()
+        self.send_queue = client_obj.get_queue()
+        self.client_addr = client_obj.get_addr()
 
     def mainloop(self):
         '''Constantly listen for data from a client'''
-        while not self.disconnect_flag.is_set():
+        while self.client.is_connected():
             
             try:
                 msg = self.connection.recv(1024)
@@ -24,7 +61,7 @@ class ListeningThread():
             except Exception as e:
                 print(f'\nConnection to {self.client_addr} lost with error\
 \n\n{e}\nlistening thread close')
-                self.disconnect_flag.set()
+                self.client.disconnect()
 
             time.sleep(1)
 
@@ -35,8 +72,8 @@ class ListeningThread():
 
     def send_to_all(self, msg):
         '''Send a message to all connected clients'''
-        for connection in connect_dict.keys():
-            conn_queue = connect_dict[connection]
+        for connection in clients:
+            conn_queue = connection.get_queue()
             print(f'\nAdding {msg} to {connection} queue')
             conn_queue.put(msg)
 
@@ -48,17 +85,23 @@ class ListeningThread():
         if msg_type == 'CHAT_MSG':
             self.send_to_all(msg)
 
+        elif msg_type == 'CHAT_IMG':
+            raise NotImplementedError
+
+        elif msg_type == 'CHAT_LOG':
+            raise NotImplementedError
+
 
 class SendingThread():
-    def __init__(self, connection, send_queue, disconnect_flag, client_addr):
-        self.connection = connection
-        self.send_queue = send_queue
-        self.disconnect_flag = disconnect_flag
-        self.client_addr = client_addr
+    def __init__(self, client_obj):
+        self.client_obj = client_obj
+        self.connection = client_obj.get_connection()
+        self.send_queue = client_obj.get_queue()
+        self.client_addr = client_obj.get_addr()
 
     def mainloop(self):
         '''Constantly wait to send something'''
-        while not self.disconnect_flag.is_set():
+        while self.client_obj.is_connected():
 
             queue_len = self.send_queue.qsize()
 
@@ -77,42 +120,47 @@ class SendingThread():
         print(f'\nSending {msg} to {self.client_addr}')
         self.connection.send(msg)
 
-class ThreadedRequestHandler(socketserver.BaseRequestHandler):                    
+class ThreadedRequestHandler(socketserver.BaseRequestHandler):
+
+    def setup(self):
+        '''Initialize variables for a client connection'''
+        
+        
+        self.client_obj = Client(self.request, self.client_address)
+
+        
+        self.send_obj = SendingThread(self.client_obj)
+        self.send_thread = threading.Thread(target=self.send_obj.mainloop)
+        
+        self.listen_obj = ListeningThread(self.client_obj)
+        self.listen_thread = threading.Thread(target=self.listen_obj.mainloop)
+
+        
+        print(f'\nConnected to {self.client_obj.get_hostname()}')
+        
+        clients.append(self.client_obj)
 
     def handle(self):
         '''Handle and keep open a client connection'''
-        send_queue = queue.Queue()
-        disconnect_flag = threading.Event()
         
-        client = self.client_address
-        
-        send_obj = SendingThread(connection=self.request, send_queue=send_queue,
-                                 disconnect_flag=disconnect_flag, client_addr=client)
-        send_thread = threading.Thread(target=send_obj.mainloop)
-        
-        listen_obj = ListeningThread(connection=self.request, send_queue=send_queue,
-                                     disconnect_flag=disconnect_flag, client_addr=client)
-        listen_thread = threading.Thread(target=listen_obj.mainloop)
+        self.send_thread.start()
+        self.listen_thread.start()
+        # Wait until client connection closes
+        self.send_thread.join()
+        self.listen_thread.join()
 
-        send_thread.start()
-        listen_thread.start()
 
-        connect_dict[client] = send_queue
+    def finish(self):
+        '''End client connection cleanly'''
         
-        print(f'\nConnected to {client}')
-
-        send_thread.join()
-        listen_thread.join()
+        print(f'\nConnection to {self.client_obj.get_hostname()} shutdown')
         
-        print(f'\nConnection to {self.client_address} shutdown')
+        clients.remove(self.client_obj)
         
-        send_queue.shutdown()
-        del connect_dict[client]
-
 class ThreadedServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     pass
 
-connect_dict = {}
+clients = []
 
 # Configure server hosting
 ip = socket.gethostbyname(socket.gethostname())
