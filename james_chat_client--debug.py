@@ -1,162 +1,164 @@
-import dearpygui.dearpygui as dpg
 import socket
 import threading
 import time
-import subprocess
-# This is an edit
+import queue
+import sys
+import dearpygui.dearpygui as dpg
 
-# Initialize the GUI
+
+class ListeningThread:
+    """A class to listen for and handle server messages"""
+
+    def __init__(self):
+        """Initialize a ListeningThread object"""
+        self.disconnected_event = threading.Event()
+        self.server_port = 6767
+        self.connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.disconnected_event.set()
+
+    def is_connected(self):
+        """Return the connection status"""
+        if self.disconnected_event.is_set():
+            return False
+        return True
+
+    def get_connection(self):
+        """Return the listener's socket object"""
+        return self.connection
+
+    def connect(self):
+        """Atempt to connect to the server"""
+        try:
+            print("\nConnecting to server...")
+            if not self.is_connected():
+                ip = socket.gethostbyname("HASSLGCP1VW3")
+
+                self.connection.connect((ip, self.server_port))
+                self.disconnected_event.clear()
+                print("Connection success")
+
+        except ConnectionError:
+            print("Connection failed")
+
+    def handle_msg(self, msg):
+        """Parse and respond to a message from the server"""
+        msg_str = msg.decode()
+        msg_type, msg_body = msg_str.split("|")
+
+        if msg_type == "CHAT_MSG":
+            disp_txt_msg(msg_body)
+
+        elif msg_type == "CHAT_IMG":
+            raise NotImplementedError
+
+        elif msg_type == "CHAT_LOG":
+            raise NotImplementedError
+
+    def mainloop(self):
+        """Lisen to the server and respond to messages"""
+        print("\nListen thread start")
+        while should_run():
+            if self.is_connected():
+
+                try:
+                    msg = self.connection.recv(1024)
+
+                    if msg is not None:
+                        print(f"\nReceived {msg}")
+                        self.handle_msg(msg)
+
+                except ConnectionResetError:
+                    print("\nDisconnected from server")
+                    self.disconnected_event.set()
+                    self.connection.close()
+                    self.connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+                except ConnectionAbortedError:
+                    break
+
+            else:
+                self.connect()
+
+            time.sleep(1)
+
+        print("Listen thread close")
+
+
+def send_msg(msg_type, msg_body):
+    """Adds a message to the SendingThread's sending queue"""
+    msg_str = f"{msg_type}|{msg_body}"
+    send_queue.put(msg_str)
+
+
+def send_mainloop():
+    """Mainloop for the sending thread"""
+    connection = listen_obj.get_connection()
+    print("\nSend thread start")
+    while should_run():
+
+        if listen_obj.is_connected() and not send_queue.empty():
+            msg = send_queue.get()
+            print(f"Sending '{msg}'")
+            connection.send(msg.encode())
+            send_queue.task_done()
+
+        time.sleep(1)
+
+    print("Send thread close")
+
+
+def should_run():
+    """Check for the termination event, return True if the event is not set"""
+    if terminate_event.is_set():
+        print("shouldnt run")
+        return False
+    return True
+
+
+def send_msg_field():
+    """Get the message from the GUI field and add it to the send queue"""
+    msg_body = dpg.get_value("message_field")
+    send_msg(msg_type="CHAT_MSG", msg_body=msg_body)
+    dpg.set_value("message_field", "")
+
+
+def disp_txt_msg(msg):
+    """Outputs a chat text message to the gui window"""
+    dpg.add_text(msg, parent="message_history")
+
+
+send_queue = queue.Queue()
+listen_obj = ListeningThread()
+send_thread = threading.Thread(target=send_mainloop, daemon=True)
+listen_thread = threading.Thread(target=listen_obj.mainloop, daemon=True)
+terminate_event = threading.Event()
+
+send_thread.start()
+listen_thread.start()
+
 dpg.create_context()
-dpg.create_viewport(title="JamesChat", height=500, width=500)
+dpg.create_viewport(title="JamesChat")
 dpg.setup_dearpygui()
-print('GUI_EVENT: DPG setup success')
-
-username = None
-connected = False
-
-def send_msg(txt, type='CHAT_MSG'):
-    '''Send a message to the server'''
-    global connected
-    print(f'Connection Status: {connected}')
-    if connected == True:
-        txt = f"{type}|{username}: {txt}"
-        client.send(txt.encode())
-        print(f'BACKEND_EVENT: sending message {txt} to server')
-
-def recv_msg():
-    '''Listen for messages from the server'''
-    global connected
-    print('BACKEND_EVENT: Listening thread start')
-    print(f'Connection Status: {connected}')
-    while True:
-        if connected == True:
-            try:
-                print('BACKEND_EVENT: listening for server...')
-                response = client.recv(1024).decode()
-                response_lst = response.split('|')
-                resp_type = response_lst[0]
-                resp_body = response_lst[1]
-
-                if response != None:
-
-                    if resp_type == 'CHAT_MSG':
-                        add_msg(resp_body)
-                        print(f'BACKEND_EVENT: received message {response}')
-
-                time.sleep(0.5)
-            except ConnectionResetError:
-                print('BACKEND_EVENT: disconnected from server')
-                dpg.configure_item("disconnected_notice", show=True)
-                connected = False
-                continue
-
-        else:
-            break
-    
-            
-def enter_msg():
-    '''Get the message field's current value'''
-    message = dpg.get_value("message_field")
-    if message != "":
-        print(f'GUI_EVENT: message set to "{message}"')
-        dpg.set_value("message_field", "")
-        send_msg(message)
-        message = ""
-
-def connect_to_server():
-    '''Attempt to connect to the server'''
-    global connected, client
-    print(f'Connection Status: {connected}')
-    try:
-        if connected == False:
-            # Get the server address
-            ip = socket.gethostbyname("HASSLGCP1VW3")
-            print(f'BACKEND_EVENT: server IP {ip}')
-            port = 6767
-            print(f'BACKEND_EVENT: server Port {port}')
-
-            # Attempt connection
-            client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            client.connect((ip, port))
-
-            # Begin listening for server messages
-            print('BACKEND_EVENT: attempt to listen')
-            listening_thread = threading.Thread(target=recv_msg)
-            listening_thread.daemon = True # don't hang on exit
-            listening_thread.start()
-
-            # Hide the disconnection dialog
-            dpg.configure_item("disconnected_notice", show=False)
-            print(f'BACKEND_EVENT: connected to server')
-            connected = True
-            print(f'Connection Status: {connected}')
-
-            send_msg('joined the server')
-            
-    # Some kind of error has come up with connection
-    except Exception as e:
-        # Log error to console
-        print(f'BACKEND_EVENT: connection attempt failed with exception {e}')
-
-        # Show the disconnection dialog
-        dpg.configure_item("disconnected_notice", show=True)
-        connected = False
-        print(f'Connection Status: {connected}')
-
-def add_msg(text):
-    '''Adds a message to the message history on the GUI'''
-    dpg.add_text(text, parent="message_history")
-    print(f'GUI_EVENT: added line "{text}" to message_history')
-
-def set_username():
-    '''Sets the username and attempts connection'''
-    global username
-    username = dpg.get_value("username")
-    
-    if username != "":
-        print(f'GUI_EVENT: username set to "{username}"')
-        
-        # Get rid of the user_auth window and show the main window
-        dpg.configure_item('user_auth', show=False)
-        dpg.configure_item('primary', show=True)
-
-        # Attempt connection
-        connect_to_server()
-        
-
-# User credentials window
-with dpg.window(label="User Credentials", tag='user_auth'):
-
-    dpg.add_text("Please enter your credentials")
-                          
-    with dpg.group(horizontal=False, width=200, height=25):
-        dpg.add_input_text(label="Username", tag="username", on_enter=True, callback=set_username)
-        dpg.add_button(label="Submit", callback=set_username)
-   
-    print('GUI_EVENT: user_auth setup success')
-
-# Disconnection dialog
-with dpg.window(label="Disconnected", tag='disconnected_notice', show=False):
-    dpg.add_text('You have disconnected from the server.')
-    dpg.add_button(label='Reconnect', callback=connect_to_server)
 
 # The main window, with sending and receiving
-with dpg.window(label="main_window", tag="primary", show=False):
+with dpg.window(label="main_window", tag="primary", show=True):
 
     with dpg.group(tag="chatroom_interface"):
-    
-        with dpg.child_window(tag="message_history", border=True, height=400):
-                dpg.add_text("===Begin Message History===")
-                print('GUI_EVENT: message_histoy window setup success')
+
+        with dpg.child_window(tag="message_history", border=True, height=625):
+            dpg.add_text("===Begin Message History===")
 
         dpg.add_separator()
 
         with dpg.group(horizontal=True):
-            dpg.add_input_text(label="", hint="Type message here", tag="message_field", on_enter=True, callback=enter_msg)
-            dpg.add_button(label="Send", callback=enter_msg)
-        
-
-    print('GUI_EVENT: chatroom_interface setup success')
+            dpg.add_input_text(
+                label="",
+                hint="Type message here",
+                tag="message_field",
+                on_enter=True,
+                callback=send_msg_field,
+            )
+            dpg.add_button(label="Send", callback=send_msg_field)
 
 dpg.set_primary_window("primary", True)
 
@@ -165,9 +167,11 @@ dpg.show_viewport()
 dpg.start_dearpygui()
 dpg.destroy_context()
 
-# Ensure backend is closed
-print('connection should close')
-connected = False
-client.close()
-sys.exit()
+terminate_event.set()
+print(terminate_event.is_set())
+listen_obj.connection.close()
+send_thread.join()
+listen_thread.join()
+print("Shutdown cleanly")
 
+sys.exit()
