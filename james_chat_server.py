@@ -132,9 +132,8 @@ class SendingThread:
 class ThreadedRequestHandler(socketserver.BaseRequestHandler):
     """Handles a client connection"""
 
-    def setup(self):
-        """Initialize variables for a client connection"""
-
+    def handle(self):
+        """Handle and keep open a client connection"""
         self.client_obj = Client(self.request, self.client_address)
 
         self.send_obj = SendingThread(self.client_obj)
@@ -146,22 +145,16 @@ class ThreadedRequestHandler(socketserver.BaseRequestHandler):
         print(f"\nConnected to {self.client_obj.get_hostname()}")
 
         clients.append(self.client_obj)
-
-    def handle(self):
-        """Handle and keep open a client connection"""
-
+        
         self.send_thread.start()
         self.listen_thread.start()
         # Wait until client connection closes
         self.send_thread.join()
         self.listen_thread.join()
 
-    def finish(self):
-        """End client connection cleanly"""
-
         print(f"\nConnection to {self.client_obj.get_hostname()} shutdown")
 
-        clients.remove(self.client_obj)
+        clients.remove(self.client_obj)       
 
 
 class ThreadedServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
