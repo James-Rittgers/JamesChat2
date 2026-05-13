@@ -92,7 +92,7 @@ class ListeningThread:
             self.send_to_all(msg)
 
         elif msg_type == "CHAT_IMG":
-            raise NotImplementedError
+            self.send_to_all(msg)
 
         elif msg_type == "CHAT_LOG":
             raise NotImplementedError
@@ -145,7 +145,7 @@ class ThreadedRequestHandler(socketserver.BaseRequestHandler):
         print(f"\nConnected to {self.client_obj.get_hostname()}")
 
         clients.append(self.client_obj)
-        
+
         self.send_thread.start()
         self.listen_thread.start()
         # Wait until client connection closes
@@ -154,7 +154,7 @@ class ThreadedRequestHandler(socketserver.BaseRequestHandler):
 
         print(f"\nConnection to {self.client_obj.get_hostname()} shutdown")
 
-        clients.remove(self.client_obj)       
+        clients.remove(self.client_obj)
 
 
 class ThreadedServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
