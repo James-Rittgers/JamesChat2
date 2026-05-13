@@ -36,8 +36,8 @@ class ListeningThread:
 
                 self.connection.connect((ip, self.server_port))
                 self.disconnected_event.clear()
+                send_msg("CLIENT_CONN", "")
                 print("Connection success")
-                send_msg("CHAT_MSG", "Someone joined the chat")
 
         except ConnectionError:
             print("Connection failed")
@@ -45,12 +45,13 @@ class ListeningThread:
     def handle_msg(self, msg):
         """Parse and respond to a message from the server"""
         msg_str = msg.decode()
-        msg_type, msg_body = msg_str.split("|")
+        msg_type, msg_sender, msg_body = msg_str.split("|")
 
         if msg_type == "CHAT_MSG":
-            disp_txt_msg(msg_body)
+            disp_txt_msg(f"{msg_sender}: {msg_body}")
 
         elif msg_type == "CHAT_IMG":
+            disp_txt_msg(msg_sender)
             disp_img_msg(msg_body)
 
         elif msg_type == "CHAT_LOG":
@@ -97,7 +98,7 @@ class SelectableImage:
         """Initialize the SelectableImage object"""
         self.path = path
         self.code = code
-        
+
         width, height, channels, data = dpg.load_image(path)
 
         with dpg.texture_registry():
@@ -188,8 +189,8 @@ code_num = 1
 images = {}
 # images = [SelectableImage(code="001", path="images\\speed_face.jpg")]
 for image_file in os.listdir("images"):
-    print(f'Loading Image {image_file}')
-    images[code_num] = (SelectableImage(path=f"images\\{image_file}", code=code_num))
+    print(f"Loading Image {image_file}")
+    images[code_num] = SelectableImage(path=f"images\\{image_file}", code=code_num)
     code_num += 1
 
 # The main window, with sending and receiving
