@@ -8,13 +8,14 @@ import queue
 class Client:
     """Represents a connected client"""
 
-    def __init__(self, connection, addr):
+    def __init__(self, connection, addr, uname):
         """Initialize a Client object"""
         self.addr = addr
         self.hostname = socket.gethostbyaddr(addr[0])
         self.connection = connection
         self.send_queue = queue.Queue()
         self.disconnect_flag = threading.Event()
+        self.uname = uname
 
     def is_connected(self):
         """Return True if the client is not disconnected"""
@@ -39,6 +40,10 @@ class Client:
         """Return the request socket for this client"""
         return self.connection
 
+    def get_uname(self):
+        """Return the client's username"""
+        return self.uname
+
     def disconnect(self):
         """Set the disconnection flag of this client to True"""
         self.disconnect_flag.set()
@@ -54,6 +59,7 @@ class ListeningThread:
         self.connection = client_obj.get_connection()
         self.send_queue = client_obj.get_queue()
         self.client_addr = client_obj.get_addr()
+        self.uname = client_obj.get_uname()
 
     def mainloop(self):
         """Constantly listen for data from a client"""
@@ -76,23 +82,13 @@ class ListeningThread:
         print(f"\nAdding {msg} to {self.client_addr} queue")
         self.send_queue.put(msg)
 
-    def send_to_all(self, msg):
-        """Send a message to all connected clients"""
-        for connection in clients:
-            conn_queue = connection.get_queue()
-            print(f"\nAdding {msg} to {connection} queue")
-            conn_queue.put(msg)
-
     def handle_message(self, msg):
         """Decode and respond to a client message"""
         msg_parse = msg.decode().split("|")
         msg_type, msg_body = msg_parse
 
-        if msg_type == "CHAT_MSG":
-            self.send_to_all(msg)
-
-        elif msg_type == "CHAT_IMG":
-            self.send_to_all(msg)
+        if msg_type == "CHAT_MSG" or msg_type == "CHAT_IMG":
+            send_to_all(msg_type, self.uname, msg_body)
 
         elif msg_type == "CHAT_LOG":
             raise NotImplementedError
@@ -107,6 +103,7 @@ class SendingThread:
         self.connection = client_obj.get_connection()
         self.send_queue = client_obj.get_queue()
         self.client_addr = client_obj.get_addr()
+        self.client_uname = client_obj.get_uname()
 
     def mainloop(self):
         """Constantly wait to send something"""
@@ -134,7 +131,10 @@ class ThreadedRequestHandler(socketserver.BaseRequestHandler):
 
     def handle(self):
         """Handle and keep open a client connection"""
-        self.client_obj = Client(self.request, self.client_address)
+        
+        uname = known_hosts[socket.gethostbyaddr(self.client_address[0])[0]]
+            
+        self.client_obj = Client(self.request, self.client_address, uname)
 
         self.send_obj = SendingThread(self.client_obj)
         self.send_thread = threading.Thread(target=self.send_obj.mainloop)
@@ -143,25 +143,44 @@ class ThreadedRequestHandler(socketserver.BaseRequestHandler):
         self.listen_thread = threading.Thread(target=self.listen_obj.mainloop)
 
         print(f"\nConnected to {self.client_obj.get_hostname()}")
+        
 
         clients.append(self.client_obj)
 
         self.send_thread.start()
         self.listen_thread.start()
+        send_to_all('CHAT_MSG', 'SERVER', f'{uname} has joined the chat')
         # Wait until client connection closes
         self.send_thread.join()
         self.listen_thread.join()
+        send_to_all('CHAT_MSG', 'SERVER', f'{uname} has left the chat')
 
         print(f"\nConnection to {self.client_obj.get_hostname()} shutdown")
 
         clients.remove(self.client_obj)
 
 
+
 class ThreadedServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     """Socketserver boilerplate"""
 
 
+def send_to_all(msg_type, origin, msg_body):
+        """Send a message to all connected clients"""
+        msg = f'{msg_type}|{origin}|{msg_body}'.encode()
+ 
+        for connection in clients:
+            
+            conn_queue = connection.get_queue()
+            print(f"\nAdding {msg} to {connection} queue")
+            try: 
+                conn_queue.put(msg)
+            except queue.ShutDown:
+                print('Attempted to send to a disconnected client')
+            
 clients = []
+
+known_hosts = {'HASSLGCP1VW3.acs.local': 'jam'}
 
 # Configure server hosting
 ip = socket.gethostbyname(socket.gethostname())
