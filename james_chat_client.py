@@ -3,6 +3,7 @@ import threading
 import time
 import queue
 import sys
+import os
 import dearpygui.dearpygui as dpg
 
 
@@ -36,7 +37,7 @@ class ListeningThread:
                 self.connection.connect((ip, self.server_port))
                 self.disconnected_event.clear()
                 print("Connection success")
-                send_msg('CHAT_MSG', 'Someone joined the chat')
+                send_msg("CHAT_MSG", "Someone joined the chat")
 
         except ConnectionError:
             print("Connection failed")
@@ -76,7 +77,7 @@ class ListeningThread:
 
                 except ConnectionAbortedError:
                     break
-                
+
                 except OSError:
                     break
 
@@ -87,15 +88,16 @@ class ListeningThread:
 
         print("Listen thread close")
 
-class SelectableImage():
+
+class SelectableImage:
     """Class to represent an image which can be selected via the popup in the
     GUI and sent to the chat"""
-    def __init__(self, name, code, path):
-        """Initialize the SelectableImage object"""
-        self.code = code
-        self.name = name
-        self.path = path
 
+    def __init__(self, path, code):
+        """Initialize the SelectableImage object"""
+        self.path = path
+        self.code = code
+        
         width, height, channels, data = dpg.load_image(path)
 
         with dpg.texture_registry():
@@ -106,9 +108,9 @@ class SelectableImage():
     def select(self):
         """Called when an image is selected from the GUI popup.
         Sends the image code to the server, and then hides the popup."""
-        print(f'Sending image: {self.name}')
+        print(f"Sending image: {self.path}")
         dpg.configure_item("image_select_popup", show=False)
-        send_msg("CHAT_IMG", self.code)   
+        send_msg("CHAT_IMG", self.code)
 
     def get_texture(self):
         """Returns the texture ID of the image"""
@@ -157,14 +159,16 @@ def disp_txt_msg(msg):
     """Outputs a chat text message to the gui window"""
     dpg.add_text(msg, parent="message_history")
 
+
 def disp_img_msg(code):
     """Outputs a chat image to the gui window"""
-    for image in images:
-        if image.code == code:
+    code = int(code)
+    image = images[code]
 
-            dpg.add_image(image.get_texture(), parent="message_history")
+    dpg.add_image(image.get_texture(), parent="message_history")
 
-            dpg.render_dearpygui_frame() 
+    dpg.render_dearpygui_frame()
+
 
 send_queue = queue.Queue()
 listen_obj = ListeningThread()
@@ -178,7 +182,16 @@ listen_thread.start()
 dpg.create_context()
 dpg.create_viewport(title="JamesChat", height=1000, width=500)
 
-images = [SelectableImage(name='Speed Face', code='001', path='images\\speed_face.jpg')]
+
+# Initialize Images
+code_num = 1
+images = {}
+# images = [SelectableImage(code="001", path="images\\speed_face.jpg")]
+for image_file in os.listdir("images"):
+    print(f'Loading Image {image_file}')
+    images[code_num] = (SelectableImage(path=f"images\\{image_file}", code=code_num))
+    code_num += 1
+
 # The main window, with sending and receiving
 with dpg.window(label="main_window", tag="primary", show=True):
 
@@ -199,22 +212,30 @@ with dpg.window(label="main_window", tag="primary", show=True):
             )
             dpg.add_button(label="Send", callback=send_msg_field)
 
-# Image sending popup
+        # Image sending popup
         with dpg.group(horizontal=True):
             btn = dpg.add_button(label="Images")
-        
-            with dpg.popup(btn, mousebutton=0, tag="image_select_popup", no_move=True, min_size=[300,400]):
-                
+
+            with dpg.popup(
+                btn,
+                mousebutton=0,
+                tag="image_select_popup",
+                no_move=True,
+                min_size=[300, 400],
+            ):
+
                 with dpg.group(horizontal=True):
                     dpg.add_text("Select image")
-                    
-                dpg.add_separator()
-                for image in images:
-                    dpg.add_image_button(label=image.name, texture_tag=image.get_texture(), callback=image.select)
 
-                
-                
-                    
+                dpg.add_separator()
+                for image_obj in images.values():
+                    dpg.add_image_button(
+                        label=image_obj.path,
+                        texture_tag=image_obj.get_texture(),
+                        callback=image_obj.select,
+                    )
+
+
 dpg.set_primary_window("primary", True)
 
 dpg.setup_dearpygui()
