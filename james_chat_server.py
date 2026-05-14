@@ -49,6 +49,10 @@ class Client:
         self.disconnect_flag.set()
         self.send_queue.shutdown()
 
+    def set_uname(self, uname):
+        """Set the username of the client"""
+        self.uname = uname
+
 
 class ListeningThread:
     """Class to handle listening for client messages"""
@@ -131,9 +135,27 @@ class ThreadedRequestHandler(socketserver.BaseRequestHandler):
 
     def handle(self):
         """Handle and keep open a client connection"""
-        
-        uname = known_hosts[socket.gethostbyaddr(self.client_address[0])[0]]
-            
+        uname = None
+        hostname = socket.gethostbyaddr(self.client_address[0])[0]
+
+        for level in [client_dict, admin_dict, banned_dict]:
+
+            try:
+                uname = level[hostname]
+
+            except KeyError:
+                continue
+
+        if uname is None:
+            print(f'Unrecognized client {hostname} attempted to connect\n\
+                  Attempting to authenticate.')
+            self.request.send('REGIS_CLIENT'.encode())
+            resp_type, uname = self.request.recv(1024).decode().split('|')
+            save_uname(hostname, uname, 'client')
+
+        else:
+            self.request.send('CONN_OK'.encode())
+
         self.client_obj = Client(self.request, self.client_address, uname)
 
         self.send_obj = SendingThread(self.client_obj)
@@ -141,24 +163,24 @@ class ThreadedRequestHandler(socketserver.BaseRequestHandler):
 
         self.listen_obj = ListeningThread(self.client_obj)
         self.listen_thread = threading.Thread(target=self.listen_obj.mainloop)
-
-        print(f"\nConnected to {self.client_obj.get_hostname()}")
         
+        print(f"\nConnected to {self.client_obj.get_hostname()}")
 
         clients.append(self.client_obj)
 
         self.send_thread.start()
         self.listen_thread.start()
-        send_to_all('CHAT_MSG', 'SERVER', f'{uname} has joined the chat')
+        send_to_all("CHAT_MSG", "SERVER", f"{uname} has joined the chat")
+        
         # Wait until client connection closes
+        
         self.send_thread.join()
         self.listen_thread.join()
-        send_to_all('CHAT_MSG', 'SERVER', f'{uname} has left the chat')
+        send_to_all("CHAT_MSG", "SERVER", f"{uname} has left the chat")
 
         print(f"\nConnection to {self.client_obj.get_hostname()} shutdown")
 
         clients.remove(self.client_obj)
-
 
 
 class ThreadedServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
@@ -166,21 +188,51 @@ class ThreadedServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
 
 
 def send_to_all(msg_type, origin, msg_body):
-        """Send a message to all connected clients"""
-        msg = f'{msg_type}|{origin}|{msg_body}'.encode()
- 
-        for connection in clients:
-            
-            conn_queue = connection.get_queue()
-            print(f"\nAdding {msg} to {connection} queue")
-            try: 
-                conn_queue.put(msg)
-            except queue.ShutDown:
-                print('Attempted to send to a disconnected client')
-            
+    """Send a message to all connected clients"""
+    msg = f"{msg_type}|{origin}|{msg_body}".encode()
+
+    for connection in clients:
+
+        conn_queue = connection.get_queue()
+        print(f"\nAdding {msg} to {connection} queue")
+        try:
+            conn_queue.put(msg)
+        except queue.ShutDown:
+            print("Attempted to send to a disconnected client")
+
+def save_uname(hostname, uname, level):
+    with open("C:\\Users\\RittgersJ\\Documents\\JamesChat\\known_hosts.txt", "a") as file:
+        file.write(f';{hostname}|{uname}|{level}')
+
+    client_dict[hostname] = uname
+
+
+
 clients = []
 
-known_hosts = {'HASSLGCP1VW3.acs.local': 'jam'}
+client_dict = {}
+admin_dict = {}
+banned_dict = {}
+
+dest_dict = {
+    'admin': admin_dict,
+    'client': client_dict,
+    'banned': banned_dict}
+
+with open("C:\\Users\\RittgersJ\\Documents\\JamesChat\\known_hosts.txt") as file:
+    lines = file.readlines()
+    
+    for line in lines:
+
+        entry = line.strip().split(';')
+        entry.pop(0)
+        
+        for i in entry:
+            hostname, username, level = i.strip().split('|')
+
+            dest_dict[level][hostname] = username
+
+    print(admin_dict)
 
 # Configure server hosting
 ip = socket.gethostbyname(socket.gethostname())
