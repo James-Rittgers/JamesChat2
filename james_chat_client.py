@@ -35,8 +35,24 @@ class ListeningThread:
                 ip = socket.gethostbyname("HASSLGCP1VW3")
 
                 self.connection.connect((ip, self.server_port))
-                self.disconnected_event.clear()
+                
                 send_msg("CLIENT_CONN", "")
+                
+                resp = self.connection.recv(1024)
+                resp = resp.decode()
+                print('waiting for connection')
+                print(resp)
+                
+                if resp == 'REGIS_CLIENT':
+                    print('Should ask for username now...')
+                    dpg.configure_item(item="uname_popup", show=True)
+                    
+                    uname_lock.wait()
+
+                    print('Uname Unlock')
+                    self.connection.send(f'REGIS_CLIENT|{uname}'.encode())
+                
+                self.disconnected_event.clear()
                 print("Connection success")
 
         except ConnectionError:
@@ -170,15 +186,21 @@ def disp_img_msg(code):
 
     dpg.render_dearpygui_frame()
 
+def enter_uname():
+    global uname
+    print('button pressed')
+    uname = dpg.get_value("username_field")
+    print(uname)
+    dpg.configure_item("uname_popup", show=False)
+    uname_lock.set()
 
+uname = None
+uname_lock = threading.Event()
 send_queue = queue.Queue()
 listen_obj = ListeningThread()
 send_thread = threading.Thread(target=send_mainloop, daemon=True)
 listen_thread = threading.Thread(target=listen_obj.mainloop, daemon=True)
 terminate_event = threading.Event()
-
-send_thread.start()
-listen_thread.start()
 
 dpg.create_context()
 dpg.create_viewport(title="JamesChat", height=1000, width=500)
@@ -188,9 +210,13 @@ dpg.create_viewport(title="JamesChat", height=1000, width=500)
 code_num = 1
 images = {}
 # images = [SelectableImage(code="001", path="images\\speed_face.jpg")]
-for image_file in os.listdir("images"):
+for image_file in os.listdir("C:\\Users\\RittgersJ\\Documents\\JamesChat\\images"):
     print(f"Loading Image {image_file}")
-    images[code_num] = SelectableImage(path=f"images\\{image_file}", code=code_num)
+    
+    images[code_num] = SelectableImage(
+        path=f"C:\\Users\\RittgersJ\\Documents\\JamesChat\\images\\{image_file}",
+        code=code_num)
+    
     code_num += 1
 
 # The main window, with sending and receiving
@@ -235,7 +261,14 @@ with dpg.window(label="main_window", tag="primary", show=True):
                         texture_tag=image_obj.get_texture(),
                         callback=image_obj.select,
                     )
+        
+with dpg.window(tag="uname_popup", modal=True, no_move=True, show=False):
+    dpg.add_text('Enter your username')
+    dpg.add_input_text(tag="username_field")
+    dpg.add_button(label='Confirm', callback=enter_uname)
 
+send_thread.start()
+listen_thread.start()
 
 dpg.set_primary_window("primary", True)
 
